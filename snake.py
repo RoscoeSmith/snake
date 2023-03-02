@@ -1,5 +1,5 @@
 from random import randint
-from time import sleep
+import heapq
 
 class CellItem:
     def __init__(self):
@@ -50,10 +50,11 @@ class Cell:
         self.r: int = r
         self.c: int = c
         self.item: CellItem = i
+        self.g = 0
         self.cost = 0
 
     def __lt__(self, rhs: "Cell") -> bool:
-        return self.cost < rhs.cost
+        return self.g < rhs.g
 
     def get_r(self) -> int:
         return self.r
@@ -70,8 +71,17 @@ class Cell:
     def set_item(self, i: CellItem):
         self.item = i
 
+    def get_g(self) -> int:
+        return self.g
+    
+    def set_g(self, n: int):
+        self.g = n
+    
     def get_cost(self) -> int:
-        return self.cost
+        return self.g
+    
+    def set_cost(self, n: int):
+        self.g = n
 
 class Game:
     def __init__(self, h: int, w: int):
@@ -103,14 +113,15 @@ class Game:
     def get_item(self, r: int, c: int) -> CellItem | None:
         return self.get_cell(r, c).get_item()
 
-    def get_neighbors(self) -> list[Cell]:
-        # neighbors: set[Cell] = set()
-        neighbors: list[Cell] = []
-        r, c = self.head.get_rc()
+    def get_neighbors(self, origin: Cell | None = None) -> set[Cell]:
+        if origin == None:
+            origin = self.head
+        neighbors: set[Cell] = set()
+        r, c = origin.get_rc()
         for vec in [(r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)]:
             try: cell: Cell = self.get_cell(*vec)
             except AssertionError: continue
-            else: neighbors.append(cell)
+            else: neighbors.add(cell)
         return neighbors
 
     def check_legal_move(self, source: Cell, target: Cell) -> bool:
@@ -118,7 +129,7 @@ class Game:
         if type(item) == EmptyCell or AppleCell:
             return True
         elif type(item) == BodyCell:
-            if item.get_decay() >= source.get_cost():
+            if item.get_decay() >= source.get_g():
                 return False
             else:
                 return True
@@ -161,23 +172,68 @@ class Game:
             g = self.apple
         return abs(g.get_c() - s.get_c()) + abs(g.get_r() - s.get_r())
 
+    def hash_cell(self, cell: Cell) -> int:
+        return (cell.get_r() * self.width) + cell.get_c()
+
+    def astar(self, start: Cell | None = None, goal: Cell | None = None) -> list[Cell]:
+        if start == None:
+            start = self.head
+        if goal == None:
+            goal = self.apple
+        opened: list[Cell] = []
+        closed: dict[int, Cell] = {}
+        parent: dict[Cell, Cell] = {}
+
+        start.set_g(0)
+        start.set_cost(self.manhattan(start, goal))
+        heapq.heappush(opened, start)
+        closed[self.hash_cell(start)] = start
+        while len(opened) != 0:
+            current: Cell = heapq.heappop(opened)
+            closed[self.hash_cell(current)] = current
+            if current == goal:
+                path: list[Cell] = [goal]
+                while next := parent[path[-1]]:
+                    if next == start:
+                        return path[::-1]
+                    path.append(next)
+            children = self.get_neighbors(current)
+            for child in children:
+                if not self.check_legal_move(current, child):
+                    continue
+                child_hash = self.hash_cell(child)
+                potential: int = current.get_g() + 1
+                if child_hash not in closed:
+                    child.set_g(potential)
+                    child.set_cost(potential + self.manhattan(child, goal))
+                    heapq.heappush(opened, child)
+                    closed[child_hash] = child
+                    parent[child] = current
+                else:
+                    if potential < closed[child_hash].get_g():
+                        closed[child_hash].set_g(potential)
+                        closed[child_hash].set_cost(potential + self.manhattan(child, goal))
+                        parent[child] = current
+                        heapq.heapify(opened)
+        print("failure")
+        return []
+
 def main() -> None:
     g = Game(10, 10)
     g.setup_game(4, 1, 4, 8)
     print(g)
     input()
     while True:
-        n = g.get_neighbors()
-        best_h = 99
-        best_cell = Cell(-1, -1)
-        for m in n:
-            h = g.manhattan(m)
-            if h < best_h:
-                best_cell = m
-                best_h = h
-        g.do_move(best_cell)
-        print(g)
-        input()
+        path = g.astar()
+        while path != []:
+            g.do_move(path[0])
+            del path[0]
+            print(g)
+            input()
 
 if __name__ == "__main__":
     main()
+
+# TODO:
+# Currently the snake thinks it can reverse
+# Currently wall collisions register one state late?
